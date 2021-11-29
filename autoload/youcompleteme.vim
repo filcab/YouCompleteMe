@@ -249,11 +249,24 @@ endfunction
 function! s:SetUpPython() abort
   py3 << EOF
 import os.path as p
+import shutil
+import subprocess
 import sys
 import traceback
 import vim
 
-root_folder = p.normpath( p.join( vim.eval( 's:script_folder_path' ), '..' ) )
+script_folder_path = vim.eval("s:script_folder_path")
+
+# check for win32-python + msys-vim combination where we get UNIX paths from vim but
+# python requires Windows paths
+if sys.platform == "win32" and vim.eval( 'has( "win32unix" )' ) and shutil.which( "cygpath" ):
+    # convert to mixed mode so we get usable paths for regular windows (non-msys) Python
+    cmd = [ "cygpath", "--mixed", script_folder_path ]
+    proc = subprocess.run( cmd, capture_output=True, text=True )
+    if proc.returncode == 0:
+        script_folder_path = proc.stdout.rstrip()
+
+root_folder = p.normpath( p.join( script_folder_path, '..' ) )
 third_party_folder = p.join( root_folder, 'third_party' )
 
 # Add dependencies to Python path.
