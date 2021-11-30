@@ -19,6 +19,8 @@ import vim
 import os
 import json
 import re
+import subprocess
+import sys
 from collections import defaultdict, namedtuple
 from functools import lru_cache as memoize
 from ycmd.utils import ( ByteOffsetToCodepointOffset,
@@ -28,6 +30,13 @@ from ycmd.utils import ( ByteOffsetToCodepointOffset,
                          OnWindows,
                          ToBytes,
                          ToUnicode )
+
+if sys.platform == 'win32':
+  from pathlib import WindowsPath as OSPath
+else:
+  from pathlib import PosixPath as OSPath
+
+IS_WIN32UNIX = vim.eval( 'has( "win32unix" )' )
 
 BUFFER_COMMAND_MAP = { 'same-buffer'      : 'edit',
                        'split'            : 'split',
@@ -164,8 +173,19 @@ def BufferIsVisible( buffer_number ):
 
 
 def GetBufferFilepath( buffer_object ):
+  def ConvertToWindowsPath( original_path ):
+    if sys.platform != "win32" or not IS_WIN32UNIX:
+      return original_path
+    cmd = [ "cygpath", "--mixed", original_path ]
+    proc = subprocess.run( cmd, capture_output=True, text=True )
+    if proc.returncode != 0:
+      return original_path
+    converted = proc.stdout.rstrip()
+    return converted
+
   if buffer_object.name:
-    return os.path.abspath( ToUnicode( buffer_object.name ) )
+    # convert the path as early as possible when using msys vim + win32 python
+    return os.path.abspath( ToUnicode( ConvertToWindowsPath( buffer_object.name ) ) )
   # Buffers that have just been created by a command like :enew don't have any
   # buffer name so we use the buffer number for that.
   name = os.path.join( GetCurrentDirectory(), str( buffer_object.number ) )
@@ -1189,6 +1209,9 @@ def OpenFilename( filename, options = {} ):
   Choices are 'start' and 'end'.
   - mods: The vim <mods> for the command, such as :vertical"""
 
+  # Fix the filename when using MINGW vim with Win32 python
+  filepath = OSPath(filename).as_posix()
+
   # Set the options.
   command = GetVimCommand( options.get( 'command', 'horizontal-split' ),
                            'horizontal-split' )
@@ -1208,7 +1231,7 @@ def OpenFilename( filename, options = {} ):
     vim.command( f'{ options.get( "mods", "") }'
                  f'{ size }'
                  f'{ command } '
-                 f'{ filename }' )
+                 f'{ filepath }' )
   # When the file we are trying to jump to has a swap file,
   # Vim opens swap-exists-choices dialog and throws vim.error with E325 error,
   # or KeyboardInterrupt after user selects one of the options which actually
@@ -1226,7 +1249,7 @@ def OpenFilename( filename, options = {} ):
     return
 
   _SetUpLoadedBuffer( command,
-                      filename,
+                      filepath,
                       options.get( 'fix', False ),
                       options.get( 'position', 'start' ),
                       options.get( 'watch', False ) )
